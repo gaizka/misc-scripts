@@ -44,7 +44,7 @@ def main():
     parser = optparse.OptionParser(usage=usage)
 
     parser.add_option("-s", "--set-password", action="store_true", dest="setpass", help="Set password for msmtp acount")
-    parser.add_option("-g", "--get-password", action="store_true", dest="getpass", help="Get password for msmstp account")
+    parser.add_option("-g", "--get-password", action="store_true", dest="getpass", help="Get password for msmtp account")
 
     parser.add_option("-u", "--username", action="store", dest="username", help="Username for msmtp account")
     parser.add_option("-e", "--server", action="store", dest="server", help="SMTP server for msmtp account")
