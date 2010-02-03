@@ -1,96 +1,175 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-'''Set/get passwords for MSMTP in Gnome Keyring
+"""
+Set/get passwords for MSMTP or MPOP in Gnome Keyring
 
 Copyright (C) 2009 Gaizka Villate
-Author: Gaizka Villate <gaizkav@gmail.com>
+              2010 Emmanuel Bouthenot
+
+Original author: Gaizka Villate <gaizkav@gmail.com>
+Other author(s): Emmanuel Bouthenot <kolter@openics.org>
+
+URL: http://github.com/gaizka/misc-scripts/tree/master/msmtp
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the GNU General Public License as published by the
 Free Software Foundation; either version 2 of the License, or (at your
 option) any later version.  See http://www.gnu.org/copyleft/gpl.html for
 the full text of the license.
-'''
+"""
 
-import gnomekeyring as gk, sys, optparse, getpass
+import sys, os.path, optparse, getpass
 
+try:
+    import gnomekeyring as gk
+except ImportError:
+    print """Unable to import gnome keyring module
+On Debian like systems you probably need to install the following package(s):
+python-gnomekeyring"""
+    sys.exit(-1)
 
-def set_keyring_password_for_msmtp_user(user, password, server):
+class keyringManager():
 
-    # Does it already exist?
-    if get_keyring_password_for_msmtp_user(user, server) is not None:
-        error_msg = "SMTP password for user '%s' in server '%s' does already exists" %(user, server)
-        return (False, error_msg)
-    
-    # get default keyring name. you can also specify it explicitly.
-    keyring = gk.get_default_keyring_sync()
-    
-    # display name for password.
-    display_name = 'SMTP password for %s at %s'%(user, server)
-    
-    # select type. if you want some kind of "network" password, it seems that
-    # appropriate type is network_password because it has a schema already.
-    type = gk.ITEM_NETWORK_PASSWORD
+    def __init__(self):
+        if os.path.basename(sys.argv[0]).find('msmtp') >= 0:
+            self.app = 'msmtp'
+            self.protocol = 'smtp'
+        elif os.path.basename(sys.argv[0]).find('mpop') >= 0:
+            self.app = 'mpop'
+            self.protocol = 'pop3'
+        else:
+            print "ERR: program must contain 'msmtp' or 'mpop' in its name"
+            sys.exit(-1)
+        # get default keyring name
+        try:
+            self.keyring = gk.get_default_keyring_sync()
+        except gk.NoKeyringDaemonError:
+            print "ERR: can't open gnome keyring"
+            print "Are you running this program under a GNOME session ?"
+            sys.exit(-1)
 
-    usr_attrs = {'user':user, 'server':server, 'protocol':'smtp'}
+    def get_app(self):
+        return self.app
 
-    # Now it gets ready to add into the keyring. Do it.
-    # Its id will be returned if success or an exception will be raised
-    id = gk.item_create_sync(keyring, type, display_name, usr_attrs, password, False)
-    return (True, "")
+    def get_protocol(self):
+        return self.protocol
 
-    
-def get_keyring_password_for_msmtp_user(user, server):
+    def set(self, user, password, server):
+        # display name for password.
+        display_name = '%s password for %s at %s' % (self.get_app().upper(), user, server)
 
-    try:
-        results = gk.find_network_password_sync(user=user, server=server, protocol='smtp')
-    except gk.NoMatchError:
-        return None
+        # select type. if you want some kind of "network" password, it seems that
+        # appropriate type is network_password because it has a schema already.
+        type = gk.ITEM_NETWORK_PASSWORD
 
-    return results[0]["password"]
+        usr_attrs = {'user':user, 'server':server, 'protocol':self.get_protocol()}
+
+        # Now it gets ready to add into the keyring. Do it.
+        # Its id will be returned if success or an exception will be raised
+        id = gk.item_create_sync(self.keyring, type, display_name, usr_attrs, password, False)
+        return id is not None
+
+    def get(self, user, server):
+        protocol = self.get_protocol()
+        try:
+            results = gk.find_network_password_sync(user=user, server=server, protocol=protocol)
+        except gk.NoMatchError:
+            return None
+
+        return results[0]["password"]
+
+    def getpass(self, username, server):
+        ret = True
+        passwd = self.get(username, server)
+        if passwd is None:
+            print "No password set for user '%s' in server '%s'" % (username, server)
+            ret = False
+        else:
+            print "Password for user '%s' in server '%s': '%s'" % (username, server, passwd)
+
+        return ret
+
+    def setpass(self, username, server):
+        ret = True
+        # Does it already exist?
+        if self.get(username, server) is not None:
+            print "ERR: %s password for user '%s' in server '%s' already exists, try do delete it first" \
+                    % (self.get_app().upper(), username, server)
+            ret = False
+        else:
+            msg = "Password for user '%s' in server '%s' ? " %(username, server)
+            passwd = getpass.getpass(msg)
+            passwd_confirmation = getpass.getpass("Confirmation ? ")
+            if passwd != passwd_confirmation:
+                print "ERR: password and password confirmation mismatch"
+                ret = False
+            else:
+                if self.set(username, passwd, server):
+                    print "Password successfully set"
+                else:
+                    print "ERR: Password failed to set"
+                    ret = False
+
+        return ret
+
+    def delpass(self, username, server):
+        ret = True
+        # Does it already exist?
+        protocol = self.get_protocol()
+        try:
+            results = gk.find_network_password_sync(user=username, server=server, protocol=protocol)
+        except gk.NoMatchError:
+            print "No password set for user '%s' in server '%s'" % (username, server)
+            ret = False
+
+        if ret:
+            gk.item_delete_sync(self.keyring, results[0]['item_id'])
+            print "Password successfully removed"
+
+        return ret
 
 def main():
-    usage = "%prog [-s|-g] --username myuser --server myserver"
-    
-    parser = optparse.OptionParser(usage=usage)
+    ret = True
+    km = keyringManager()
 
-    parser.add_option("-s", "--set-password", action="store_true", dest="setpass", help="Set password for msmtp acount")
-    parser.add_option("-g", "--get-password", action="store_true", dest="getpass", help="Get password for msmtp account")
-
-    parser.add_option("-u", "--username", action="store", dest="username", help="Username for msmtp account")
-    parser.add_option("-e", "--server", action="store", dest="server", help="SMTP server for msmtp account")
+    parser = optparse.OptionParser(usage="%prog [-s|-g] --username myuser --server myserver")
+    parser.add_option("-s", "--set-password", action="store_true", \
+            dest="setpass", help="Set password for %s account" % (km.get_app()))
+    parser.add_option("-g", "--get-password", action="store_true", \
+            dest="getpass", help="Get password for %s account" % (km.get_app()))
+    parser.add_option("-d", "--del-password", action="store_true", \
+            dest="delpass", help="Delete password for %s account" % (km.get_app()))
+    parser.add_option("-u", "--username", action="store", dest="username", \
+            help="Username for %s account" % (km.get_app()))
+    parser.add_option("-e", "--server", action="store", dest="server", \
+            help="SMTP server for %s account" % (km.get_app()))
 
     (opts, args) = parser.parse_args()
 
-    if not opts.setpass and not opts.getpass:
+    if not opts.setpass and not opts.getpass and not opts.delpass:
         parser.print_help()
-        print "You have to use -s or -g !!"
-        return -1
-
-    if not opts.username or not opts.server:
+        print "ERR: You have to use -s or -g or -d"
+        ret = False
+    elif not opts.username or not opts.server:
         parser.print_help()
-        print "You have to use both --username and --server !!"
-        return -1
+        print "ERR: You have to use both --username and --server"
+        ret = False
     elif opts.getpass:
-        passwd = get_keyring_password_for_msmtp_user(opts.username, opts.server)
-        print "Password for user '%s' in server '%s' : %s" %(opts.username, opts.server, passwd)
-    else: # setpass
-        msg = "Password for user '%s' in server '%s' ? " %(opts.username, opts.server)
-        passwd = getpass.getpass(msg)
-        passwd_confirmation = getpass.getpass("Confirmation, " + msg)
-        if passwd != passwd_confirmation:
-            print "Password and password confirmation are different, exiting..."
-            return -1
-        status_ok, error_msg = set_keyring_password_for_msmtp_user(opts.username, passwd, opts.server)
-        if not status_ok:
-            print error_msg
-            return -1
-        else:
-            print "Password set!!"
-    return 0
+        ret = km.getpass(opts.username, opts.server)
+    elif opts.setpass:
+        ret = km.setpass(opts.username, opts.server)
+    elif opts.delpass:
+        ret = km.delpass(opts.username, opts.server)
+    else:
+        print "ERR: Unknown option(s)"
+        ret = False
 
+    return ret
 
 if __name__ == '__main__':
-    sys.exit(main())
+    if main():
+        sys.exit(0)
+    else:
+        sys.exit(-1)
 
