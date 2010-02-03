@@ -133,7 +133,7 @@ def main():
     ret = True
     km = keyringManager()
 
-    parser = optparse.OptionParser(usage="%prog [-s|-g] --username myuser --server myserver")
+    parser = optparse.OptionParser(usage="%prog [-s|-g|-d] --username myuser --server myserver")
     parser.add_option("-s", "--set-password", action="store_true", \
             dest="setpass", help="Set password for %s account" % (km.get_app()))
     parser.add_option("-g", "--get-password", action="store_true", \
