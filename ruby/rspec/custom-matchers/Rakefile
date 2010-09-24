@@ -1,0 +1,4 @@
+task :default do
+  system("spec --color -f specdoc user_spec.rb")
+end
+
